@@ -92,8 +92,6 @@ class SensorTag extends Component<Props, State> {
     this.startScanTime = 0;
     this.csvDataRow = EMPTY_CSV_DATA_ROW,
     this.deviceSet = new Set(); // Use to get num sensors read
-    this.deviceMap = new Map();
-    this.deviceAssignMap = new Map();
   }
 
   updateLogs = (log: string): void => {
@@ -143,6 +141,7 @@ class SensorTag extends Component<Props, State> {
 
     // Reset data
     this.setState({ startScan: false });
+    this.deviceSet = new Set();
     this.csvDataRow = EMPTY_CSV_DATA_ROW;
   }
 
