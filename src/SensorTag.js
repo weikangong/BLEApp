@@ -23,23 +23,25 @@ import {
   forgetSensorTag,
   ConnectionState,
 } from './Reducer';
-import {Device, BleManager} from 'react-native-ble-plx';
-import {SensorTagTests, type SensorTagTestMetadata} from './Tests';
+import { Device, BleManager } from 'react-native-ble-plx';
+import { SensorTagTests, type SensorTagTestMetadata } from './Tests';
 import RNFS from 'react-native-fs';
 
+const FILE_DIRECTORY = `${RNFS.ExternalStorageDirectoryPath}/Download/`;
+const FILE_NAME = 'data.csv';
 const IBEACON_MANUFACTURER_DATA = 'TAACFQAFAAEAABAAgAAAgF+bATEABmd4ww==';
 const NUM_SENSORS = 16;
-const TIME_INTERVAL = 2000; // In milliseconds
+const TIME_INTERVAL = '2000'; // In milliseconds
 // Init empty csv row on each collectData
-const EMPTY_CSV_DATA_ROW = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+const EMPTY_CSV_DATA_ROW = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 // Map device id to arr index
-const deviceIDMap = Object.freeze({
-  '00:A0:50:12:24:2E': 0,
-  '00:A0:50:07:1A:2E': 1,
-  '00:A0:50:18:0F:1F': 2,
-  '00:A0:50:03:1F:33': 3,
-  '00:A0:50:07:2B:2C': 4,
-  '00:A0:50:06:11:17': 5,
+const DEVICE_ID_MAP = Object.freeze({
+  '00:A0:50:12:24:2E': 1,
+  '00:A0:50:07:1A:2E': 2,
+  '00:A0:50:18:0F:1F': 3,
+  '00:A0:50:03:1F:33': 4,
+  '00:A0:50:07:2B:2C': 5,
+  '00:A0:50:06:11:17': 6,
 });
 
 const Button = function(props) {
@@ -84,6 +86,8 @@ class SensorTag extends Component<Props, State> {
       showModal: false,
       logs: [],
       startScan: false,
+      interval: TIME_INTERVAL,
+      fileName: FILE_NAME,
     };
     this.startScanTime = 0;
     this.csvDataRow = EMPTY_CSV_DATA_ROW,
@@ -98,14 +102,14 @@ class SensorTag extends Component<Props, State> {
     this.setState({ logs });
   };
 
-  scanAndSaveRSSI = async () => {
+  scanAndStoreRSSI = async () => {
     this.updateLogs('Scanning started...');
 
     await this.manager.startDeviceScan(null, null, (error, device) => {
         if (!this.state.startScan) {
           this.setState({ startScan: true });
           this.startScanTime = Date.now();
-          setTimeout(this.stopScan, TIME_INTERVAL);
+          setTimeout(this.stopScanAndSave, this.state.interval-0);
         }
 
         console.log('time', Date.now());
@@ -118,23 +122,48 @@ class SensorTag extends Component<Props, State> {
 
           // If device id mapping exists,
           // get mapped index and set rssi value in csvDataRow
-          if (deviceIDMap[device.id]) {
-            this.csvDataRow[deviceIDMap[device.id]] = device.rssi;
+          if (DEVICE_ID_MAP[device.id]) {
+            this.csvDataRow[DEVICE_ID_MAP[device.id]] = device.rssi;
           }
         }
     });
   }
 
-  stopScan = () => {
+  stopScanAndSave = async () => {
     this.manager.stopDeviceScan();
+
+    this.csvDataRow[0] = Date.now();
+    this.csvDataRow[this.csvDataRow.length-1] = this.state.label;
+
     this.updateLogs(`Scanning stopped, took ${Date.now()-this.startScanTime} ms`);
-    this.updateLogs(`CSV Data Row: ${this.csvDataRow}`);
+    this.updateLogs(`CSV Data Row:\n ${this.csvDataRow}`);
+
+    await this.saveToFile();
+
+
+    // Reset data
     this.setState({ startScan: false });
     this.csvDataRow = EMPTY_CSV_DATA_ROW;
   }
 
   clearLogs = () => {
     this.setState({ logs: [] });
+  }
+
+  saveToFile = async () => {
+    try {
+      let fileContent = await RNFS.readFile(FILE_DIRECTORY+this.state.fileName, 'utf8');
+      console.log('saveToFile', this.state.fileName, fileContent);
+      fileContent += `\n${this.csvDataRow}`;
+      await RNFS.writeFile(FILE_DIRECTORY+this.state.fileName, fileContent, 'utf8');
+    } catch {
+      const idHeaders = Object.keys(DEVICE_ID_MAP);
+      const headers = `${['timestamp', ...idHeaders, 'label'].join(',')}\n`;
+      const fileContent = headers+`${this.csvDataRow.join(',')}`;
+
+      await RNFS.writeFile(FILE_DIRECTORY+this.state.fileName, fileContent, 'utf8');
+    }
+
   }
 
   renderLogs() {
@@ -223,7 +252,7 @@ class SensorTag extends Component<Props, State> {
   collectData = () => {
     const subscription = this.manager.onStateChange((state) => {
         if (state === 'PoweredOn') {
-            this.scanAndSaveRSSI();
+            this.scanAndStoreRSSI();
             subscription.remove();
             this.setState({ isBluetoothOn: true });
         } else {
@@ -232,32 +261,48 @@ class SensorTag extends Component<Props, State> {
     }, true);
   }
 
-  changeLabelText = (text: string): void => {
-    this.setState({ label: text });
+  changeText = (key: string, text: string): void => {
+    this.setState({ [key]: text });
   }
 
   renderHeader = (): React.Node => (
     <View>
       <Text style={styles.header}>Bluetooth Status: {this.state.isBluetoothOn ? 'ON' : 'OFF'}</Text>
-      <Text style={styles.subheader}>Current interval: {TIME_INTERVAL} ms</Text>
+      <Text style={styles.subheader}>Current interval: {this.state.interval} ms, saving to {this.state.fileName}</Text>
     </View>
   );
 
   renderLabelInput = (): React.Node => {
     return (
-      <View style={styles.labelContainer}>
-        <Text style={styles.labelText}>Label:</Text>
-        <TextInput
-          style={styles.labelTextInput}
-          onChangeText={this.changeLabelText}
-          value={this.state.label}
-        />
-        <Button
-          style={{ margin: 10, borderRadius: 20 }}
-          disabled={this.state.startScan}
-          onPress={this.collectData}
-          title={'Start'}
-        />
+      <View>
+        <View style={styles.labelRow}>
+          <Text style={styles.labelText}>Label:</Text>
+          <TextInput
+            style={styles.labelTextInput}
+            onChangeText={(text) => this.changeText('label', text)}
+            value={this.state.label}
+          />
+          <Text style={styles.labelText}>Interval:</Text>
+          <TextInput
+            style={styles.labelTextInput}
+            onChangeText={(text) => this.changeText('interval', text)}
+            value={this.state.interval}
+          />
+        </View>
+        <View style={styles.labelRow}>
+          <Text style={styles.labelText}>File Name:</Text>
+          <TextInput
+            style={styles.labelTextInput}
+            onChangeText={(text) => this.changeText('fileName', text)}
+            value={this.state.fileName}
+          />
+          <Button
+            style={{ margin: 5, borderRadius: 20 }}
+            disabled={this.state.startScan}
+            onPress={this.collectData}
+            title={'Start'}
+          />
+        </View>
     </View>);
   }
 
@@ -287,7 +332,7 @@ const styles = StyleSheet.create({
   subheader: {
     alignSelf: 'center',
     fontSize: 14,
-    marginTop: 10
+    margin: 10
   },
   textStyle: {
     color: 'white',
@@ -309,13 +354,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     color: 'rgba(255, 255, 255, 0.5)',
   },
-  labelContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    margin: 10
-  },
   labelText: {
-    paddingRight: 10,
+    padding: 5,
+    alignSelf: 'center'
   },
   labelTextInput: {
     flex: 1,
@@ -324,7 +365,12 @@ const styles = StyleSheet.create({
     borderColor: 'gray',
     borderWidth: 1,
     borderRadius: 20,
-    backgroundColor: '#FFFFFF'
+    backgroundColor: '#FFFFFF',
+  },
+  labelRow: {
+    flexDirection: 'row',
+    margin: 5,
+    justifyContent: 'center'
   }
 });
 
