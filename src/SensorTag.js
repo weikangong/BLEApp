@@ -42,6 +42,9 @@ const DEVICE_ID_MAP = Object.freeze({
   '00:A0:50:03:1F:33': 4,
   '00:A0:50:07:2B:2C': 5,
   '00:A0:50:06:11:17': 6,
+  '00:A0:50:13:17:2B': 7,
+  '00:A0:50:08:28:1F': 8,
+  '00:A0:50:12:1F:27': 9,
 });
 
 const Button = function(props) {
@@ -110,12 +113,12 @@ class SensorTag extends Component<Props, State> {
           setTimeout(this.stopScanAndSave, this.state.interval-0);
         }
 
-        console.log('time', Date.now());
         if (error) return;
         if (this.deviceSet.size === NUM_SENSORS) return;
 
         // Sensor is iBeacon
         if (device.manufacturerData && IBEACON_MANUFACTURER_DATA.substr(0,16) === device.manufacturerData.substr(0,16)) {
+          console.log('device id matched', device.id, device.rssi, DEVICE_ID_MAP[device.id]);
           this.deviceSet.add(device.id);
 
           // If device id mapping exists,
