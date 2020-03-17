@@ -54,7 +54,7 @@ const Button = function(props) {
       <Text
         style={[
           styles.buttonStyle,
-          restProps.disabled ? styles.disabledButtonStyle : null,
+          restProps.isScan ? styles.startScanButtonStyle : null,
         ]}>
         {title}
       </Text>
@@ -95,6 +95,8 @@ class SensorTag extends Component<Props, State> {
     this.startScanTime = 0;
     this.csvDataRow = EMPTY_CSV_DATA_ROW,
     this.deviceSet = new Set(); // Use to get num sensors read
+    this.timer = null;
+    this.myFlatListRef = null;
   }
 
   updateLogs = (log: string): void => {
@@ -107,10 +109,10 @@ class SensorTag extends Component<Props, State> {
     this.updateLogs('Scanning started...');
 
     await this.manager.startDeviceScan(null, null, (error, device) => {
-        if (!this.state.startScan) {
+        if (!this.timer) {
           this.setState({ startScan: true });
           this.startScanTime = Date.now();
-          setTimeout(this.stopScanAndSave, this.state.interval-0);
+          this.timer = setTimeout(this.repeatScan, this.state.interval-0);
         }
 
         if (error) return;
@@ -130,8 +132,15 @@ class SensorTag extends Component<Props, State> {
     });
   }
 
+  repeatScan = async () => {
+    await this.stopScanAndSave();
+    this.scanAndStoreRSSI();
+  }
+
   stopScanAndSave = async () => {
-    this.manager.stopDeviceScan();
+    clearTimeout(this.timer);
+    this.timer = null;
+    await this.manager.stopDeviceScan();
 
     this.csvDataRow[0] = Date.now();
     this.csvDataRow[this.csvDataRow.length-1] = this.state.label;
@@ -143,9 +152,9 @@ class SensorTag extends Component<Props, State> {
 
 
     // Reset data
-    this.setState({ startScan: false });
     this.deviceSet = new Set();
     this.csvDataRow = EMPTY_CSV_DATA_ROW;
+
   }
 
   clearLogs = () => {
@@ -172,12 +181,14 @@ class SensorTag extends Component<Props, State> {
     return (
       <View style={{flex: 1, padding: 10, paddingTop: 0}}>
         <FlatList
+          ref={ (ref) => { this.myFlatListRef = ref } }
           style={{flex: 1}}
           data={this.state.logs}
           renderItem={({item}) => (
             <Text style={styles.logTextStyle}> {item} </Text>
           )}
           keyExtractor={(item, index) => index.toString()}
+          onContentSizeChange={ () => { this.myFlatListRef.scrollToEnd({animated:true}) } }
         />
         <Button
           style={{ paddingTop: 10 }}
@@ -251,7 +262,7 @@ class SensorTag extends Component<Props, State> {
     );
   }
 
-  collectData = () => {
+  startCollectData = () => {
     const subscription = this.manager.onStateChange((state) => {
         if (state === 'PoweredOn') {
             this.scanAndStoreRSSI();
@@ -261,6 +272,14 @@ class SensorTag extends Component<Props, State> {
           this.setState({ isBluetoothOn: false });
         }
     }, true);
+  }
+
+  stopCollectData = () => {
+    this.setState({ startScan: false });
+    this.updateLogs('Scanning stopped');
+    clearTimeout(this.timer);
+    this.manager.stopDeviceScan();
+    this.timer = null;
   }
 
   changeText = (key: string, text: string): void => {
@@ -300,9 +319,9 @@ class SensorTag extends Component<Props, State> {
           />
           <Button
             style={{ margin: 5, borderRadius: 20 }}
-            disabled={this.state.startScan}
-            onPress={this.collectData}
-            title={'Start'}
+            isScan={this.state.startScan}
+            onPress={this.state.startScan ? this.stopCollectData : this.startCollectData}
+            title={this.state.startScan ? 'Stop' : 'Start'}
           />
         </View>
     </View>);
@@ -352,9 +371,8 @@ const styles = StyleSheet.create({
     fontSize: 18,
     borderRadius: 10
   },
-  disabledButtonStyle: {
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    color: 'rgba(255, 255, 255, 0.5)',
+  startScanButtonStyle: {
+    backgroundColor: 'red',
   },
   labelText: {
     padding: 5,
